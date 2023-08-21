@@ -365,7 +365,10 @@ public class AaptInvoker {
             throws AndrolibException {
 
         String aaptPath = mConfig.aaptPath;
-        boolean customAapt = !aaptPath.isEmpty();
+        // Mock using the included AAPT binary instead of a custom one.
+        // This is necessary, otherwise extension of every file from doNotCompress will be specified in the AAPT command
+        // which causes builds to fail.
+        boolean customAapt = false; // !aaptPath.isEmpty();
         List<String> cmd = new ArrayList<>();
 
         try {
