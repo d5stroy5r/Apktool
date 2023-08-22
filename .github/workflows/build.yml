@@ -76,7 +76,7 @@ jobs:
           distribution: 'zulu'
           java-version: ${{ matrix.java }}
       - name: Build and test
-        uses: gradle/gradle-build-action@v2.7.0
+        uses: gradle/gradle-build-action@v2.7.1
         with:
           arguments: build shadowJar proguard
 
@@ -93,11 +93,11 @@ jobs:
           distribution: 'zulu'
           java-version: 17
       - name: Build
-        uses: gradle/gradle-build-action@v2.7.0
+        uses: gradle/gradle-build-action@v2.7.1
         with:
           arguments: build shadowJar proguard
       - name: Upload
         uses: actions/upload-artifact@v3
         with:
           name: apktool.jar
-          path: brut.apktool/apktool-cli/build/libs/apktool-*-small.jar
+          path: brut.apktool/apktool-cli/build/libs/apktool-*-SNAPSHOT.jar
