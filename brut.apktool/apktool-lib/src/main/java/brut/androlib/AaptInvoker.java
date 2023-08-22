@@ -180,7 +180,8 @@ public class AaptInvoker {
 
         cmd.add("--allow-reserved-package-id");
 
-        cmd.add("--no-compile-sdk-metadata");
+        // TODO: Add this back, once AAPT2 from platform-tools 34.0.4 is stable
+        // cmd.add("--no-compile-sdk-metadata");
 
         if (mApkInfo.sparseResources) {
             cmd.add("--enable-sparse-encoding");
