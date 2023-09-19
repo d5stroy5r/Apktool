@@ -15,7 +15,7 @@ on:
       - 'gradlew.bat'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   BINARY_PATH: brut.apktool/apktool-lib/src/main/resources/prebuilt
