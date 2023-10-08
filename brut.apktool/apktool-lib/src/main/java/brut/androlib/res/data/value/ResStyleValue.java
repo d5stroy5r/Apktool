@@ -26,10 +26,8 @@ import org.xmlpull.v1.XmlSerializer;
 import java.io.IOException;
 import java.util.logging.Logger;
 
-public class ResStyleValue extends ResBagValue implements
-        ResValuesXmlSerializable {
-    ResStyleValue(ResReferenceValue parent,
-                  Duo<Integer, ResScalarValue>[] items, ResValueFactory factory) {
+public class ResStyleValue extends ResBagValue implements ResValuesXmlSerializable {
+    ResStyleValue(ResReferenceValue parent, Duo<Integer, ResScalarValue>[] items, ResValueFactory factory) {
         super(parent);
 
         mItems = new Duo[items.length];
@@ -53,7 +51,7 @@ public class ResStyleValue extends ResBagValue implements
             ResResSpec spec = mItem.m1.getReferent();
 
             if (spec == null) {
-                LOGGER.fine(String.format("null reference: m1=0x%08x(%s), m2=0x%08x(%s)",
+                LOGGER.fine(String.format("null style reference: m1=0x%08x(%s), m2=0x%08x(%s)",
                     mItem.m1.getRawIntValue(), mItem.m1.getType(), mItem.m2.getRawIntValue(), mItem.m2.getType()));
                 continue;
             }

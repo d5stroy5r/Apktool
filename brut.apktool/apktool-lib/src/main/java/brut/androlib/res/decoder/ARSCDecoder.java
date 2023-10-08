@@ -59,11 +59,11 @@ public class ARSCDecoder {
         mIn = new ExtCountingDataInput(new LittleEndianDataInputStream(arscStream));
         mResTable = resTable;
         mKeepBroken = keepBroken;
+        mMissingResSpecMap = new LinkedHashMap<>();
     }
 
     private ResPackage[] readResourceTable() throws IOException, AndrolibException {
         Set<ResPackage> pkgs = new LinkedHashSet<>();
-
         ResTypeSpec typeSpec;
         int chunkNumber = 1;
 
@@ -116,6 +116,10 @@ public class ARSCDecoder {
                     }
                     break chunkLoop;
             }
+        }
+
+        if (mResTable.getConfig().isDecodeResolveModeUsingDummies() && mPkg != null && mPkg.getResSpecCount() > 0) {
+            addMissingResSpecs();
         }
 
         return pkgs.toArray(new ResPackage[0]);
@@ -207,7 +211,7 @@ public class ARSCDecoder {
         mHeader.checkForUnreadHeader(mIn);
 
         for (int i = 0; i < count; i++) {
-            LOGGER.fine(String.format("Skipping staged alias stagedId (%h) finalId: %h", mIn.readInt(), mIn.readInt()));
+            LOGGER.fine(String.format("Staged alias: 0x%08x -> 0x%08x", mIn.readInt(), mIn.readInt()));
         }
     }
 
@@ -256,10 +260,16 @@ public class ARSCDecoder {
     private ResType readTableType() throws IOException, AndrolibException {
         checkChunkType(ARSCHeader.XML_TYPE_TYPE);
         int typeId = mIn.readUnsignedByte() - mTypeIdOffset;
+
+        // #3311 - Some older applications have no TYPE_SPEC chunks, but still define TYPE chunks.
         if (mResTypeSpecs.containsKey(typeId)) {
-            mResId = (0xff000000 & mResId) | mResTypeSpecs.get(typeId).getId() << 16;
             mTypeSpec = mResTypeSpecs.get(typeId);
+        } else {
+            mTypeSpec = new ResTypeSpec(mTypeNames.getString(typeId - 1), typeId);
+            addTypeSpec(mTypeSpec);
+            mPkg.addType(mTypeSpec);
         }
+        mResId = (0xff000000 & mResId) | mTypeSpec.getId() << 16;
 
         int typeFlags = mIn.readByte();
         mIn.skipBytes(2); // reserved
@@ -270,16 +280,21 @@ public class ARSCDecoder {
 
         mHeader.checkForUnreadHeader(mIn);
 
+        boolean isOffset16 = (typeFlags & TABLE_TYPE_FLAG_OFFSET16) != 0;
+        boolean isSparse = (typeFlags & TABLE_TYPE_FLAG_SPARSE) != 0;
+
         // Be sure we don't poison mResTable by marking the application as sparse
         // Only flag the ResTable as sparse if the main package is not loaded.
-        if ((typeFlags & 0x01) != 0 && !mResTable.isMainPkgLoaded()) {
+        if (isSparse && !mResTable.isMainPkgLoaded()) {
             mResTable.setSparseResources(true);
         }
 
         HashMap<Integer, Integer> entryOffsetMap = new LinkedHashMap<>();
         for (int i = 0; i < entryCount; i++) {
-            if ((typeFlags & 0x01) != 0) {
+            if (isSparse) {
                 entryOffsetMap.put(mIn.readUnsignedShort(), mIn.readUnsignedShort());
+            } else if (isOffset16) {
+                entryOffsetMap.put(i, mIn.readUnsignedShort());
             } else {
                 entryOffsetMap.put(i, mIn.readInt());
             }
@@ -295,11 +310,13 @@ public class ARSCDecoder {
         }
 
         mType = flags.isInvalid && !mKeepBroken ? null : mPkg.getOrCreateConfig(flags);
+        int noEntry = isOffset16 ? NO_ENTRY_OFFSET16 : NO_ENTRY;
 
         for (int i : entryOffsetMap.keySet()) {
             mResId = (mResId & 0xffff0000) | i;
             int offset = entryOffsetMap.get(i);
-            if (offset == NO_ENTRY) {
+            if (offset == noEntry) {
+                mMissingResSpecMap.put(mResId, typeId);
                 continue;
             }
 
@@ -315,6 +332,8 @@ public class ARSCDecoder {
             EntryData entryData = readEntryData();
             if (entryData != null) {
                 readEntry(entryData);
+            } else {
+                mMissingResSpecMap.put(mResId, typeId);
             }
         }
 
@@ -329,17 +348,35 @@ public class ARSCDecoder {
 
     private EntryData readEntryData() throws IOException, AndrolibException {
         short size = mIn.readShort();
-        if (size < 0) {
-            throw new AndrolibException("Entry size is under 0 bytes.");
+        short flags = mIn.readShort();
+
+        boolean isComplex = (flags & ENTRY_FLAG_COMPLEX) != 0;
+        boolean isCompact = (flags & ENTRY_FLAG_COMPACT) != 0;
+
+        if (size < 0 && !isCompact) {
+            throw new AndrolibException("Entry size is under 0 bytes and not compactly packed.");
         }
 
-        short flags = mIn.readShort();
         int specNamesId = mIn.readInt();
-        if (specNamesId == NO_ENTRY) {
+        if (specNamesId == NO_ENTRY && !isCompact) {
             return null;
         }
 
-        ResValue value = (flags & ENTRY_FLAG_COMPLEX) == 0 ? readValue() : readComplexEntry();
+        // #3366 - In a compactly packed entry, the key index is the size & type is higher 8 bits on flags.
+        // We assume a size of 8 bytes for compact entries and the specNamesId is the data itself encoded.
+        ResValue value;
+        if (isCompact) {
+            byte type = (byte) ((flags >> 8) & 0xFF);
+            value = readCompactValue(type, specNamesId);
+
+            // To keep code below happy - we know if compact that the size has the key index encoded.
+            specNamesId = size;
+        } else if (isComplex) {
+            value = readComplexEntry();
+        } else {
+            value = readValue();
+        }
+
         // #2824 - In some applications the res entries are duplicated with the 2nd being malformed.
         // AOSP skips this, so we will do the same.
         if (value == null) {
@@ -402,6 +439,12 @@ public class ARSCDecoder {
             resId = mIn.readInt();
             resValue = readValue();
 
+            // #2824 - In some applications the res entries are duplicated with the 2nd being malformed.
+            // AOSP skips this, so we will do the same.
+            if (resValue == null) {
+                continue;
+            }
+
             if (!(resValue instanceof ResScalarValue)) {
                 resValue = new ResStringValue(resValue.toString(), resValue.getRawIntValue());
             }
@@ -409,6 +452,12 @@ public class ARSCDecoder {
         }
 
         return factory.bagFactory(parent, items, mTypeSpec);
+    }
+
+    private ResIntBasedValue readCompactValue(byte type, int data) throws AndrolibException {
+        return type == TypedValue.TYPE_STRING
+            ? mPkg.getValueFactory().factory(mTableStrings.getHTML(data), data)
+            : mPkg.getValueFactory().factory(type, data, null);
     }
 
     private ResIntBasedValue readValue() throws IOException, AndrolibException {
@@ -464,11 +513,12 @@ public class ARSCDecoder {
         byte keyboard = 0;
         byte navigation = 0;
         byte inputFlags = 0;
+        byte grammaticalInflection = 0;
         if (size >= 20) {
             keyboard = mIn.readByte();
             navigation = mIn.readByte();
             inputFlags = mIn.readByte();
-            mIn.skipBytes(1); // inputPad0
+            grammaticalInflection = mIn.readByte();
             read = 20;
         }
 
@@ -526,6 +576,7 @@ public class ARSCDecoder {
         }
 
         int exceedingKnownSize = size - KNOWN_CONFIG_BYTES;
+
         if (exceedingKnownSize > 0) {
             byte[] buf = new byte[exceedingKnownSize];
             read += exceedingKnownSize;
@@ -550,7 +601,7 @@ public class ARSCDecoder {
 
         return new ResConfigFlags(mcc, mnc, language, country,
                 orientation, touchscreen, density, keyboard, navigation,
-                inputFlags, screenWidth, screenHeight, sdkVersion,
+                inputFlags, grammaticalInflection, screenWidth, screenHeight, sdkVersion,
                 screenLayout, uiMode, smallestScreenWidthDp, screenWidthDp,
                 screenHeightDp, localeScript, localeVariant, screenLayout2,
                 colorMode, localeNumberingSystem, isInvalid, size);
@@ -589,6 +640,30 @@ public class ARSCDecoder {
         mResTypeSpecs.put(resTypeSpec.getId(), resTypeSpec);
     }
 
+    private void addMissingResSpecs() throws AndrolibException {
+        for (int resId : mMissingResSpecMap.keySet()) {
+            int typeId = mMissingResSpecMap.get(resId);
+            String resName = "APKTOOL_DUMMY_" + Integer.toHexString(resId);
+            ResID id = new ResID(resId);
+            ResResSpec spec = new ResResSpec(id, resName, mPkg, mResTypeSpecs.get(typeId));
+
+            // If we already have this resID don't add it again.
+            if (! mPkg.hasResSpec(id)) {
+                mPkg.addResSpec(spec);
+                spec.getType().addResSpec(spec);
+                ResType resType = mPkg.getOrCreateConfig(new ResConfigFlags());
+
+                // We are going to make dummy attributes a null reference (@null) now instead of a boolean false.
+                // This is because aapt2 is stricter when it comes to what we can put in an application.
+                ResValue value = new ResReferenceValue(mPkg, 0, "");
+
+                ResResource res = new ResResource(resType, spec, value);
+                resType.addResource(res);
+                spec.addResource(res);
+            }
+        }
+    }
+
     private ARSCHeader nextChunk() throws IOException {
         return mHeader = ARSCHeader.read(mIn);
     }
@@ -614,15 +689,21 @@ public class ARSCDecoder {
     private ResType mType;
     private int mResId;
     private int mTypeIdOffset = 0;
+    private final HashMap<Integer, Integer> mMissingResSpecMap;
     private final HashMap<Integer, ResTypeSpec> mResTypeSpecs = new HashMap<>();
 
     private final static short ENTRY_FLAG_COMPLEX = 0x0001;
     private final static short ENTRY_FLAG_PUBLIC = 0x0002;
     private final static short ENTRY_FLAG_WEAK = 0x0004;
+    private final static short ENTRY_FLAG_COMPACT = 0x0008;
+
+    private final static short TABLE_TYPE_FLAG_SPARSE = 0x01;
+    private final static short TABLE_TYPE_FLAG_OFFSET16 = 0x02;
 
     private static final int KNOWN_CONFIG_BYTES = 64;
 
     private static final int NO_ENTRY = 0xFFFFFFFF;
+    private static final int NO_ENTRY_OFFSET16 = 0xFFFF;
 
     private static final Logger LOGGER = Logger.getLogger(ARSCDecoder.class.getName());
 }

@@ -55,7 +55,7 @@ public class Main {
         CommandLine commandLine;
 
         // load options
-        _Options();
+        _options();
 
         try {
             commandLine = parser.parse(allOptions, args, false);
@@ -167,6 +167,34 @@ public class Main {
         if (cli.hasOption("m") || cli.hasOption("match-original")) {
             config.analysisMode = true;
         }
+        if (cli.hasOption("resm") || cli.hasOption("res-mode") || cli.hasOption("resolve-resources-mode")) {
+            String mode = cli.getOptionValue("resm");
+            if (mode == null) {
+                mode = cli.getOptionValue("res-mode");
+            }
+            if (mode == null) {
+                mode = cli.getOptionValue("resolve-resources-mode");
+            }
+
+            switch (mode) {
+                case "remove":
+                case "delete":
+                    config.setDecodeResolveMode(Config.DECODE_RES_RESOLVE_REMOVE);
+                    break;
+                case "dummy":
+                case "dummies":
+                    config.setDecodeResolveMode(Config.DECODE_RES_RESOLVE_DUMMY);
+                    break;
+                case "keep":
+                case "preserve":
+                    config.setDecodeResolveMode(Config.DECODE_RES_RESOLVE_RETAIN);
+                    break;
+                default:
+                    System.err.println("Unknown resolve resources mode: " + mode);
+                    System.err.println("Expect: 'remove', 'dummy' or 'keep'.");
+                    System.exit(1);
+            }
+        }
 
         File outDir;
         if (cli.hasOption("o") || cli.hasOption("output")) {
@@ -239,11 +267,13 @@ public class Main {
         if (cli.hasOption("nc") || cli.hasOption("no-crunch")) {
             config.noCrunch = true;
         }
+        if (cli.hasOption("use-aapt1")) {
+            config.useAapt2 = false;
+        }
 
-        // Temporary flag to enable the use of aapt2. This will transform in time to a use-aapt1 flag, which will be
-        // legacy and eventually removed.
-        if (cli.hasOption("use-aapt2")) {
-            config.useAapt2 = true;
+        if (cli.hasOption("use-aapt1") && cli.hasOption("use-aapt2")) {
+            System.err.println("You can only use one of --use-aapt1 or --use-aapt2.");
+            System.exit(1);
         }
 
         File outFile;
@@ -300,9 +330,7 @@ public class Main {
         System.out.println(ApktoolProperties.getVersion());
     }
 
-    private static void _Options() {
-
-        // create options
+    private static void _options() {
         Option versionOption = Option.builder("version")
                 .longOpt("version")
                 .desc("Print the version.")
@@ -409,6 +437,13 @@ public class Main {
                 .desc("Skip changes detection and build all files.")
                 .build();
 
+        Option resolveResModeOption = Option.builder("resm")
+                .longOpt("resource-mode")
+                .desc("Sets the resolve resources mode. Possible values are: 'remove' (default), 'dummy' or 'keep'.")
+                .hasArg(true)
+                .argName("mode")
+                .build();
+
         Option aaptOption = Option.builder("a")
                 .longOpt("aapt")
                 .hasArg(true)
@@ -416,9 +451,14 @@ public class Main {
                 .desc("Load aapt from specified location.")
                 .build();
 
+        Option aapt1Option = Option.builder()
+            .longOpt("use-aapt1")
+            .desc("Use aapt binary instead of aapt2 during the build step.")
+            .build();
+
         Option aapt2Option = Option.builder()
                 .longOpt("use-aapt2")
-                .desc("Use aapt2 binary instead of aapt1 during the build step.")
+                .desc("Use aapt2 binary instead of aapt during the build step.")
                 .build();
 
         Option originalOption = Option.builder("c")
@@ -469,13 +509,14 @@ public class Main {
             decodeOptions.addOption(apiLevelOption);
             decodeOptions.addOption(noAssetOption);
             decodeOptions.addOption(forceManOption);
+            decodeOptions.addOption(resolveResModeOption);
 
             buildOptions.addOption(apiLevelOption);
             buildOptions.addOption(debugBuiOption);
             buildOptions.addOption(netSecConfOption);
             buildOptions.addOption(aaptOption);
             buildOptions.addOption(originalOption);
-            buildOptions.addOption(aapt2Option);
+            buildOptions.addOption(aapt1Option);
             buildOptions.addOption(noCrunchOption);
         }
 
@@ -525,6 +566,7 @@ public class Main {
         allOptions.addOption(debugDecOption);
         allOptions.addOption(noDbgOption);
         allOptions.addOption(forceManOption);
+        allOptions.addOption(resolveResModeOption);
         allOptions.addOption(noAssetOption);
         allOptions.addOption(keepResOption);
         allOptions.addOption(debugBuiOption);
@@ -533,6 +575,7 @@ public class Main {
         allOptions.addOption(originalOption);
         allOptions.addOption(verboseOption);
         allOptions.addOption(quietOption);
+        allOptions.addOption(aapt1Option);
         allOptions.addOption(aapt2Option);
         allOptions.addOption(noCrunchOption);
         allOptions.addOption(onlyMainClassesOption);
@@ -547,7 +590,7 @@ public class Main {
     }
 
     private static void usage() {
-        _Options();
+        _options();
         HelpFormatter formatter = new HelpFormatter();
         formatter.setWidth(120);
 
@@ -592,11 +635,18 @@ public class Main {
             return;
         }
 
-        Handler handler = new Handler(){
+        Handler handler = new Handler() {
             @Override
             public void publish(LogRecord record) {
                 if (getFormatter() == null) {
-                    setFormatter(new SimpleFormatter());
+                    setFormatter(new Formatter() {
+                        @Override
+                        public String format(LogRecord record) {
+                            return record.getLevel().toString().charAt(0) + ": "
+                                + record.getMessage()
+                                + System.getProperty("line.separator");
+                        }
+                    });
                 }
 
                 try {
@@ -616,6 +666,7 @@ public class Main {
                     reportError(null, exception, ErrorManager.FORMAT_FAILURE);
                 }
             }
+
             @Override
             public void close() throws SecurityException {}
             @Override
@@ -627,15 +678,6 @@ public class Main {
         if (verbosity == Verbosity.VERBOSE) {
             handler.setLevel(Level.ALL);
             logger.setLevel(Level.ALL);
-        } else {
-            handler.setFormatter(new Formatter() {
-                @Override
-                public String format(LogRecord record) {
-                    return record.getLevel().toString().charAt(0) + ": "
-                            + record.getMessage()
-                            + System.getProperty("line.separator");
-                }
-            });
         }
     }
 
