@@ -159,12 +159,12 @@ public class ResourcesDecoder {
         decoders.setDecoder("xml", new XmlPullStreamDecoder(axmlParser, getResXmlSerializer()));
 
         ResFileDecoder fileDecoder = new ResFileDecoder(decoders);
-        Directory in, out;
+        Directory in, out, outRes;
 
         try {
             out = new FileDirectory(outDir);
             in = mApkInfo.getApkFile().getDirectory();
-            out = out.createDir("res");
+            outRes = out.createDir("res");
         } catch (DirectoryException ex) {
             throw new AndrolibException(ex);
         }
@@ -174,14 +174,14 @@ public class ResourcesDecoder {
 
             LOGGER.info("Decoding file-resources...");
             for (ResResource res : pkg.listFiles()) {
-                fileDecoder.decode(res, in, out, mResFileMapping);
+                fileDecoder.decode(res, in, outRes, mResFileMapping);
             }
 
             LOGGER.info("Decoding values */* XMLs...");
             for (ResValuesFile valuesFile : pkg.listValuesFiles()) {
-                generateValuesFile(valuesFile, out, xmlSerializer);
+                generateValuesFile(valuesFile, outRes, xmlSerializer);
             }
-            generatePublicXml(pkg, out, xmlSerializer);
+            generatePublicXml(pkg, outRes, xmlSerializer);
         }
 
         AndrolibException decodeError = axmlParser.getFirstError();

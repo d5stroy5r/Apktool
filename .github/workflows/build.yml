@@ -72,12 +72,12 @@ jobs:
         java: [ 8, 11, 17, 21 ]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v3
+      - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: ${{ matrix.java }}
       - name: Build and test
-        uses: gradle/gradle-build-action@v2.9.0
+        uses: gradle/gradle-build-action@v2.10.0
         with:
           arguments: build shadowJar proguard
 
@@ -91,12 +91,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v3
+      - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: 17
       - name: Build
-        uses: gradle/gradle-build-action@v2.9.0
+        uses: gradle/gradle-build-action@v2.10.0
         with:
           dependency-graph: generate-and-submit
           arguments: build shadowJar proguard
