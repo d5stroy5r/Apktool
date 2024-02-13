@@ -1,7 +1,7 @@
 import java.io.ByteArrayOutputStream
 
 val version = "2.9.1"
-val suffix = ""
+val suffix = "SNAPSHOT"
 
 // Strings embedded into the build.
 var gitRevision by extra("")
@@ -36,7 +36,7 @@ val gitBranch: String? by lazy {
     }
 }
 
-if ("publishToMavenLocal" !in gradle.startParameter.taskNames) {
+if ("release" !in gradle.startParameter.taskNames) {
     val hash = this.gitDescribe
 
     if (hash == null) {
@@ -84,7 +84,7 @@ subprojects {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    val mavenProjects = arrayOf("apktool-lib", "brut.j.common", "brut.j.util", "brut.j.dir")
+    val mavenProjects = arrayOf("apktool-lib", "apktool-cli", "brut.j.common", "brut.j.util", "brut.j.dir")
 
     if (project.name in mavenProjects) {
         apply(plugin = "maven-publish")
@@ -96,6 +96,15 @@ subprojects {
         }
 
         publishing {
+            repositories {
+                maven {
+                    url = uri("https://maven.pkg.github.com/revanced/Apktool")
+                    credentials {
+                        username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user").toString()
+                        password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key").toString()
+                    }
+                }
+            }
             publications {
                 register("mavenJava", MavenPublication::class) {
                     from(components["java"])
@@ -138,6 +147,11 @@ subprojects {
 
         tasks.withType<Javadoc>() {
             (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet")
+        }
+
+        signing {
+            useGpgCmd()
+            sign(publishing.publications["mavenJava"])
         }
     }
 }
