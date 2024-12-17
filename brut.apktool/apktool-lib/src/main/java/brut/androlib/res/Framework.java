@@ -22,8 +22,7 @@ import brut.androlib.exceptions.CantFindFrameworkResException;
 import brut.androlib.res.decoder.ARSCDecoder;
 import brut.androlib.res.data.arsc.ARSCData;
 import brut.androlib.res.data.arsc.FlagsOffset;
-import brut.util.Jar;
-import org.apache.commons.io.IOUtils;
+import brut.util.BrutIO;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -35,76 +34,65 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 public class Framework {
-    private final Config config;
+    private static final Logger LOGGER = Logger.getLogger(Framework.class.getName());
 
-    private File mFrameworkDirectory = null;
-
-    private final static Logger LOGGER = Logger.getLogger(Framework.class.getName());
+    private final Config mConfig;
+    private File mFrameworkDirectory;
 
     public Framework(Config config) {
-        this.config = config;
+        mConfig = config;
     }
 
     public void installFramework(File frameFile) throws AndrolibException {
-        installFramework(frameFile, config.frameworkTag);
+        installFramework(frameFile, mConfig.frameworkTag);
     }
 
     public void installFramework(File frameFile, String tag) throws AndrolibException {
-        InputStream in = null;
-        ZipOutputStream out = null;
-        try {
-            ZipFile zip = new ZipFile(frameFile);
+        try (ZipFile zip = new ZipFile(frameFile)) {
             ZipEntry entry = zip.getEntry("resources.arsc");
 
             if (entry == null) {
-                throw new AndrolibException("Can't find resources.arsc file");
+                throw new AndrolibException("Could not find resources.arsc file");
             }
 
-            in = zip.getInputStream(entry);
-            byte[] data = IOUtils.toByteArray(in);
-
-            ARSCData arsc = ARSCDecoder.decode(new ByteArrayInputStream(data), true, true);
+            byte[] data = BrutIO.readAndClose(zip.getInputStream(entry));
+            ARSCDecoder decoder = new ARSCDecoder(new ByteArrayInputStream(data), null, true, true);
+            ARSCData arsc = decoder.decode();
             publicizeResources(data, arsc.getFlagsOffsets());
 
-            File outFile = new File(getFrameworkDirectory(), arsc
-                .getOnePackage().getId()
-                + (tag == null ? "" : '-' + tag)
-                + ".apk");
+            File outFile = new File(getFrameworkDirectory(),
+                arsc.getOnePackage().getId() + (tag == null ? "" : '-' + tag) + ".apk");
 
-            out = new ZipOutputStream(Files.newOutputStream(outFile.toPath()));
-            out.setMethod(ZipOutputStream.STORED);
-            CRC32 crc = new CRC32();
-            crc.update(data);
-            entry = new ZipEntry("resources.arsc");
-            entry.setSize(data.length);
-            entry.setMethod(ZipEntry.STORED);
-            entry.setCrc(crc.getValue());
-            out.putNextEntry(entry);
-            out.write(data);
-            out.closeEntry();
-
-            //Write fake AndroidManifest.xml file to support original aapt
-            entry = zip.getEntry("AndroidManifest.xml");
-            if (entry != null) {
-                in = zip.getInputStream(entry);
-                byte[] manifest = IOUtils.toByteArray(in);
-                CRC32 manifestCrc = new CRC32();
-                manifestCrc.update(manifest);
-                entry.setSize(manifest.length);
-                entry.setCompressedSize(-1);
-                entry.setCrc(manifestCrc.getValue());
+            try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(outFile.toPath()))) {
+                out.setMethod(ZipOutputStream.STORED);
+                CRC32 crc = new CRC32();
+                crc.update(data);
+                entry = new ZipEntry("resources.arsc");
+                entry.setSize(data.length);
+                entry.setMethod(ZipEntry.STORED);
+                entry.setCrc(crc.getValue());
                 out.putNextEntry(entry);
-                out.write(manifest);
+                out.write(data);
                 out.closeEntry();
+
+                // write fake AndroidManifest.xml file to support original aapt
+                entry = zip.getEntry("AndroidManifest.xml");
+                if (entry != null) {
+                    byte[] manifest = BrutIO.readAndClose(zip.getInputStream(entry));
+                    CRC32 manifestCrc = new CRC32();
+                    manifestCrc.update(manifest);
+                    entry.setSize(manifest.length);
+                    entry.setCompressedSize(-1);
+                    entry.setCrc(manifestCrc.getValue());
+                    out.putNextEntry(entry);
+                    out.write(manifest);
+                    out.closeEntry();
+                }
             }
 
-            zip.close();
             LOGGER.info("Framework installed to: " + outFile);
         } catch (IOException ex) {
             throw new AndrolibException(ex);
-        } finally {
-            IOUtils.closeQuietly(in);
-            IOUtils.closeQuietly(out);
         }
     }
 
@@ -125,8 +113,10 @@ public class Framework {
     public void publicizeResources(File arscFile) throws AndrolibException {
         byte[] data = new byte[(int) arscFile.length()];
 
-        try(InputStream in = Files.newInputStream(arscFile.toPath());
-            OutputStream out = Files.newOutputStream(arscFile.toPath())) {
+        try (
+            InputStream in = Files.newInputStream(arscFile.toPath());
+            OutputStream out = Files.newOutputStream(arscFile.toPath())
+        ) {
             //noinspection ResultOfMethodCallIgnored
             in.read(data);
             publicizeResources(data);
@@ -136,16 +126,18 @@ public class Framework {
         }
     }
 
-    private void publicizeResources(byte[] arsc) throws AndrolibException {
-        publicizeResources(arsc, ARSCDecoder.decode(new ByteArrayInputStream(arsc), true, true).getFlagsOffsets());
+    private void publicizeResources(byte[] data) throws AndrolibException {
+        ARSCDecoder decoder = new ARSCDecoder(new ByteArrayInputStream(data), null, true, true);
+        ARSCData arsc = decoder.decode();
+        publicizeResources(data, arsc.getFlagsOffsets());
     }
 
-    public void publicizeResources(byte[] arsc, FlagsOffset[] flagsOffsets) {
+    public void publicizeResources(byte[] data, FlagsOffset[] flagsOffsets) {
         for (FlagsOffset flags : flagsOffsets) {
             int offset = flags.offset + 3;
             int end = offset + 4 * flags.count;
             while (offset < end) {
-                arsc[offset] |= (byte) 0x40;
+                data[offset] |= (byte) 0x40;
                 offset += 4;
             }
         }
@@ -159,7 +151,7 @@ public class Framework {
         String path;
 
         // use default framework path or specified on the command line
-        path = config.frameworkDirectory;
+        path = mConfig.frameworkDirectory;
 
         File dir = new File(path);
 
@@ -171,19 +163,19 @@ public class Framework {
             throw new AndrolibException("Please remove file at " + dir.getParentFile());
         }
 
-        if (! dir.exists()) {
-            if (! dir.mkdirs()) {
-                if (config.frameworkDirectory != null) {
-                    LOGGER.severe("Can't create Framework directory: " + dir);
+        if (!dir.exists()) {
+            if (!dir.mkdirs()) {
+                if (mConfig.frameworkDirectory != null) {
+                    LOGGER.severe("Could not create Framework directory: " + dir);
                 }
                 throw new AndrolibException(String.format(
-                    "Can't create directory: (%s). Pass a writable path with --frame-path {DIR}. ", dir
+                    "Could not create directory: (%s). Pass a writable path with --frame-path {DIR}. ", dir
                 ));
             }
         }
 
-        if (config.frameworkDirectory == null) {
-            if (! dir.canWrite()) {
+        if (mConfig.frameworkDirectory == null) {
+            if (!dir.canWrite()) {
                 LOGGER.severe(String.format("WARNING: Could not write to (%1$s), using %2$s instead...",
                     dir.getAbsolutePath(), System.getProperty("java.io.tmpdir")));
                 LOGGER.severe("Please be aware this is a volatile directory and frameworks could go missing, " +
@@ -214,15 +206,12 @@ public class Framework {
         }
 
         if (id == 1) {
-            try (
-                InputStream in = getAndroidFrameworkResourcesAsStream();
-                OutputStream out = Files.newOutputStream(apk.toPath())
-            ) {
-                IOUtils.copy(in, out);
-                return apk;
+            try {
+                BrutIO.copyAndClose(getAndroidFrameworkResourcesAsStream(), Files.newOutputStream(apk.toPath()));
             } catch (IOException ex) {
                 throw new AndrolibException(ex);
             }
+            return apk;
         }
 
         throw new CantFindFrameworkResException(id);
@@ -234,11 +223,11 @@ public class Framework {
 
         apk = new File(dir, "1.apk");
 
-        if (! apk.exists()) {
-            LOGGER.warning("Can't empty framework directory, no file found at: " + apk.getAbsolutePath());
+        if (!apk.exists()) {
+            LOGGER.warning("Could not empty framework directory, no file found at: " + apk.getAbsolutePath());
         } else {
             try {
-                if (apk.exists() && Objects.requireNonNull(dir.listFiles()).length > 1 && ! config.forceDeleteFramework) {
+                if (apk.exists() && Objects.requireNonNull(dir.listFiles()).length > 1 && !mConfig.forceDeleteFramework) {
                     LOGGER.warning("More than default framework detected. Please run command with `--force` parameter to wipe framework directory.");
                 } else {
                     for (File file : Objects.requireNonNull(dir.listFiles())) {
@@ -249,13 +238,13 @@ public class Framework {
                         }
                     }
                 }
-            } catch (NullPointerException e) {
-                throw new AndrolibException(e);
+            } catch (NullPointerException ex) {
+                throw new AndrolibException(ex);
             }
         }
     }
 
     private InputStream getAndroidFrameworkResourcesAsStream() {
-        return Jar.class.getResourceAsStream("/brut/androlib/android-framework.jar");
+        return Framework.class.getResourceAsStream("/prebuilt/android-framework.jar");
     }
 }

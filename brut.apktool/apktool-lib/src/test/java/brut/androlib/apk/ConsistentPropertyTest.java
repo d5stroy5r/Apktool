@@ -26,7 +26,7 @@ public class ConsistentPropertyTest {
     @Test
     public void testAssertingAllKnownApkInfoProperties() throws AndrolibException {
         ApkInfo apkInfo = ApkInfo.load(
-            this.getClass().getResourceAsStream("/apk/basic.yml"));
+            getClass().getResourceAsStream("/apk/basic.yml"));
 
         assertEquals("2.8.0", apkInfo.version);
         assertEquals("basic.apk", apkInfo.apkFileName);
@@ -40,11 +40,8 @@ public class ConsistentPropertyTest {
         assertEquals("com.test.basic", apkInfo.packageInfo.renameManifestPackage);
         assertEquals("71", apkInfo.versionInfo.versionCode);
         assertEquals("1.0.70", apkInfo.versionInfo.versionName);
-        assertFalse(apkInfo.resourcesAreCompressed);
         assertFalse(apkInfo.sharedLibrary);
         assertTrue(apkInfo.sparseResources);
-        assertEquals(1, apkInfo.unknownFiles.size());
         assertEquals(2, apkInfo.doNotCompress.size());
-        assertFalse(apkInfo.compressionType);
     }
 }

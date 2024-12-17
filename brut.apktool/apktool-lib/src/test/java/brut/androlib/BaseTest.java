@@ -23,12 +23,15 @@ import brut.directory.FileDirectory;
 import org.custommonkey.xmlunit.*;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.*;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -37,22 +40,16 @@ import static org.custommonkey.xmlunit.XMLAssert.assertXMLEqual;
 import static org.junit.Assert.*;
 
 public class BaseTest {
+    protected static final Logger LOGGER = Logger.getLogger(BaseTest.class.getName());
 
-    protected void compareUnknownFiles() throws BrutException {
-        ApkInfo control = ApkInfo.load(sTestOrigDir);
-        ApkInfo test = ApkInfo.load(sTestNewDir);
-        assertNotNull(control.unknownFiles);
-        assertNotNull(test.unknownFiles);
+    private static final String ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD";
+    private static final String ACCESS_EXTERNAL_SCHEMA = "http://javax.xml.XMLConstants/property/accessExternalSchema";
+    private static final String FEATURE_LOAD_DTD = "http://apache.org/xml/features/nonvalidating/load-external-dtd";
+    private static final String FEATURE_DISABLE_DOCTYPE_DECL = "http://apache.org/xml/features/disallow-doctype-decl";
 
-        Map<String, String> controlFiles = control.unknownFiles;
-        Map<String, String> testFiles = test.unknownFiles;
-        assertEquals(controlFiles.size(), testFiles.size());
-
-        // Make sure that the compression methods are still the same
-        for (Map.Entry<String, String> controlEntry : controlFiles.entrySet()) {
-            assertEquals(controlEntry.getValue(), testFiles.get(controlEntry.getKey()));
-        }
-    }
+    protected static ExtFile sTmpDir;
+    protected static ExtFile sTestOrigDir;
+    protected static ExtFile sTestNewDir;
 
     protected void compareBinaryFolder(String path, boolean res) throws BrutException, IOException {
         boolean exists = true;
@@ -67,10 +64,10 @@ public class BaseTest {
         FileDirectory fileDirectory = new FileDirectory(sTestOrigDir, location);
 
         Set<String> files = fileDirectory.getFiles(true);
-        for (String filename : files) {
+        for (String fileName : files) {
 
-            File control = new File((sTestOrigDir + location), filename);
-            File test =  new File((sTestNewDir + location), filename);
+            File control = new File((sTestOrigDir + location), fileName);
+            File test =  new File((sTestNewDir + location), fileName);
 
             if (! test.isFile() || ! control.isFile()) {
                 exists = false;
@@ -90,6 +87,10 @@ public class BaseTest {
 
     protected void compareAssetsFolder(String path) throws BrutException, IOException {
         compareBinaryFolder(File.separatorChar + "assets" + File.separatorChar + path, false);
+    }
+
+    protected void compareUnknownFiles() throws BrutException, IOException {
+        compareBinaryFolder(File.separatorChar + "unknown", false);
     }
 
     protected void compareValuesFiles(String path) throws BrutException {
@@ -135,24 +136,24 @@ public class BaseTest {
         assertTrue(path + ": " + diff.getAllDifferences().toString(), diff.similar());
     }
 
-    protected static Document loadDocument(File file) throws IOException, SAXException, ParserConfigurationException {
-
-        DocumentBuilderFactory docFactory = DocumentBuilderFactory.newInstance();
-        docFactory.setFeature(FEATURE_DISABLE_DOCTYPE_DECL, true);
-        docFactory.setFeature(FEATURE_LOAD_DTD, false);
+    protected static Document loadDocument(File file)
+            throws IOException, SAXException, ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature(FEATURE_DISABLE_DOCTYPE_DECL, true);
+        factory.setFeature(FEATURE_LOAD_DTD, false);
 
         try {
-            docFactory.setAttribute(ACCESS_EXTERNAL_DTD, " ");
-            docFactory.setAttribute(ACCESS_EXTERNAL_SCHEMA, " ");
+            factory.setAttribute(ACCESS_EXTERNAL_DTD, " ");
+            factory.setAttribute(ACCESS_EXTERNAL_SCHEMA, " ");
         } catch (IllegalArgumentException ex) {
             LOGGER.warning("JAXP 1.5 Support is required to validate XML");
         }
 
-        DocumentBuilder docBuilder = docFactory.newDocumentBuilder();
+        DocumentBuilder builder = factory.newDocumentBuilder();
         // Not using the parse(File) method on purpose, so that we can control when
         // to close it. Somehow parse(File) does not seem to close the file in all cases.
-        try (FileInputStream inputStream = new FileInputStream(file)) {
-            return docBuilder.parse(inputStream);
+        try (InputStream in = Files.newInputStream(file.toPath())) {
+            return builder.parse(in);
         }
     }
 
@@ -167,14 +168,18 @@ public class BaseTest {
         return count;
     }
 
-    protected static ExtFile sTmpDir;
-    protected static ExtFile sTestOrigDir;
-    protected static ExtFile sTestNewDir;
-
-    protected final static Logger LOGGER = Logger.getLogger(BaseTest.class.getName());
-
-    private static final String ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD";
-    private static final String ACCESS_EXTERNAL_SCHEMA = "http://javax.xml.XMLConstants/property/accessExternalSchema";
-    private static final String FEATURE_LOAD_DTD = "http://apache.org/xml/features/nonvalidating/load-external-dtd";
-    private static final String FEATURE_DISABLE_DOCTYPE_DECL = "http://apache.org/xml/features/disallow-doctype-decl";
+    protected static boolean resourceNameContains(Element element, String name) {
+        if (element.hasAttribute("name") && element.getAttribute("name").contains(name)) {
+            return true;
+        }
+        NodeList children = element.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE
+                    && resourceNameContains((Element) child, name)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

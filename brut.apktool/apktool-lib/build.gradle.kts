@@ -1,25 +1,10 @@
 val gitRevision: String by rootProject.extra
 val apktoolVersion: String by rootProject.extra
 
-// region Determine Android SDK location
-
-val sdkRoot: String? = System.getenv("ANDROID_SDK_ROOT")
-val androidJarPath: String = if (sdkRoot == null) {
-    GradleException("Missing ANDROID_SDK_ROOT").printStackTrace()
-
-    "com.google.android:android:4.1.1.4"
-} else {
-    val androidVersion = 33
-    File("$sdkRoot/platforms/android-$androidVersion/android.jar").path
-}
-
-// endregion
-
 tasks {
     processResources {
-        from("src/main/resources/properties") {
-            include("**/*.properties")
-            into("properties")
+        from("src/main/resources") {
+            include("apktool.properties")
             expand("version" to apktoolVersion, "gitrev" to gitRevision)
             duplicatesStrategy = DuplicatesStrategy.INCLUDE
         }
@@ -39,13 +24,13 @@ tasks {
 }
 
 dependencies {
-    api(project(":brut.j.dir"))
-    api(project(":brut.j.util"))
     api(project(":brut.j.common"))
+    api(project(":brut.j.util"))
+    api(project(":brut.j.dir"))
+    api(project(":brut.j.xml"))
 
     implementation(libs.baksmali)
     implementation(libs.smali)
-    implementation(libs.xmlpull)
     implementation(libs.guava)
     implementation(libs.commons.lang3)
     implementation(libs.commons.io)
@@ -54,5 +39,15 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.xmlunit)
 
-    compileOnly(files(androidJarPath))
+    val sdkRoot = System.getenv("ANDROID_HOME")
+    compileOnly(
+        if (sdkRoot == null) {
+            GradleException("Missing ANDROID_HOME").printStackTrace()
+
+            "com.google.android:android:4.1.1.4"
+        } else {
+            val androidVersion = 33
+            files("$sdkRoot/platforms/android-$androidVersion/android.jar")
+        }
+    )
 }

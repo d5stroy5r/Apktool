@@ -7,6 +7,7 @@ import brut.androlib.exceptions.CantFind9PatchChunkException;
 import brut.androlib.res.data.ninepatch.NinePatchData;
 import brut.androlib.res.data.ninepatch.OpticalInset;
 import brut.util.ExtDataInput;
+import brut.util.ExtDataInputStream;
 import org.apache.commons.io.IOUtils;
 
 import java.io.*;
@@ -87,14 +88,14 @@ public class Res9patchAndroidStreamDecoder implements ResStreamDecoder {
 
     private NinePatchData getNinePatch(byte[] data) throws AndrolibException,
             IOException {
-        ExtDataInput di = new ExtDataInput(new ByteArrayInputStream(data));
+        ExtDataInput di = ExtDataInputStream.bigEndian(new ByteArrayInputStream(data));
         find9patchChunk(di, NP_CHUNK_TYPE);
         return NinePatchData.decode(di);
     }
 
     private OpticalInset getOpticalInset(byte[] data) throws AndrolibException,
             IOException {
-        ExtDataInput di = new ExtDataInput(new ByteArrayInputStream(data));
+        ExtDataInput di = ExtDataInputStream.bigEndian(new ByteArrayInputStream(data));
         find9patchChunk(di, OI_CHUNK_TYPE);
         return OpticalInset.decode(di);
     }

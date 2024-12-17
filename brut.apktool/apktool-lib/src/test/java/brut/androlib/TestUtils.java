@@ -18,19 +18,23 @@ package brut.androlib;
 
 import brut.androlib.exceptions.AndrolibException;
 import brut.androlib.res.Framework;
-import brut.androlib.res.xml.ResXmlPatcher;
+import brut.androlib.res.xml.ResXmlUtils;
 import brut.common.BrutException;
-import brut.directory.DirUtil;
+import brut.directory.DirUtils;
 import brut.directory.Directory;
 import brut.directory.FileDirectory;
 import brut.util.OS;
 import org.w3c.dom.Document;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
-import org.xmlpull.v1.XmlPullParser;
-import org.xmlpull.v1.XmlPullParserException;
-import org.xmlpull.v1.XmlPullParserFactory;
 
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpressionException;
+import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -38,73 +42,58 @@ import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 
-public abstract class TestUtils {
+public final class TestUtils {
 
-    public static Map<String, String> parseStringsXml(File file)
-            throws BrutException {
+    private TestUtils() {
+        // Private constructor for utility class
+    }
+
+    public static Map<String, String> parseStringsXml(File file) throws BrutException {
         try {
-            XmlPullParser xpp = XmlPullParserFactory.newInstance().newPullParser();
-            xpp.setInput(new FileReader(file));
+            Document doc = getDocumentFromFile(file);
+            XPath xPath = XPathFactory.newInstance().newXPath();
+            String expression = "/resources/string[@name]";
+            NodeList nodes = (NodeList) xPath.evaluate(expression, doc, XPathConstants.NODESET);
 
-            int eventType;
-            String key = null;
             Map<String, String> map = new HashMap<>();
-            while ((eventType = xpp.next()) != XmlPullParser.END_DOCUMENT) {
-                switch (eventType) {
-                    case XmlPullParser.START_TAG:
-                        if ("string".equals(xpp.getName())) {
-                            int attrCount = xpp.getAttributeCount();
-                            for (int i = 0; i < attrCount; i++) {
-                                if ("name".equals(xpp.getAttributeName(i))) {
-                                    key = xpp.getAttributeValue(i);
-                                    break;
-                                }
-                            }
-                        }
-                        break;
-                    case XmlPullParser.END_TAG:
-                        if ("string".equals(xpp.getName())) {
-                            key = null;
-                        }
-                        break;
-                    case XmlPullParser.TEXT:
-                        if (key != null) {
-                            map.put(key, xpp.getText());
-                        }
-                        break;
-                }
+
+            for (int i = 0; i < nodes.getLength(); i++) {
+                Node node = nodes.item(i);
+                NamedNodeMap attrs = node.getAttributes();
+                Node nameAttr = attrs.getNamedItem("name");
+                map.put(nameAttr.getNodeValue(), node.getTextContent());
             }
 
             return map;
-        } catch (IOException | XmlPullParserException ex) {
+        } catch (XPathExpressionException ex) {
             throw new BrutException(ex);
         }
     }
 
     public static Document getDocumentFromFile(File file) throws BrutException {
         try {
-            return ResXmlPatcher.loadDocument(file);
-        } catch (ParserConfigurationException | SAXException | IOException ex) {
+            return ResXmlUtils.loadDocument(file);
+        } catch (IOException | SAXException | ParserConfigurationException ex) {
             throw new BrutException(ex);
         }
     }
 
-    public static void copyResourceDir(Class<?> class_, String dirPath, File out) throws BrutException {
+    public static void copyResourceDir(Class<?> clz, String dirPath, File out) throws BrutException {
         if (!out.exists()) {
             out.mkdirs();
         }
-        copyResourceDir(class_, dirPath, new FileDirectory(out));
+        copyResourceDir(clz, dirPath, new FileDirectory(out));
     }
 
-    public static void copyResourceDir(Class<?> class_, String dirPath, Directory out) throws BrutException {
-        if (class_ == null) {
-            class_ = Class.class;
+    public static void copyResourceDir(Class<?> clz, String dirPath, Directory out) throws BrutException {
+        if (clz == null) {
+            clz = Class.class;
         }
 
-        URL dirURL = class_.getClassLoader().getResource(dirPath);
+        URL dirURL = clz.getClassLoader().getResource(dirPath);
         if (dirURL != null && dirURL.getProtocol().equals("file")) {
             try {
-                DirUtil.copyToDir(new FileDirectory(dirURL.getFile()), out);
+                DirUtils.copyToDir(new FileDirectory(dirURL.getFile()), out);
             } catch (UnsupportedEncodingException ex) {
                 throw new BrutException(ex);
             }
@@ -112,15 +101,15 @@ public abstract class TestUtils {
         }
 
         if (dirURL == null) {
-            String className = class_.getName().replace(".", "/") + ".class";
-            dirURL = class_.getClassLoader().getResource(className);
+            String className = clz.getName().replace(".", "/") + ".class";
+            dirURL = clz.getClassLoader().getResource(className);
         }
 
         if (dirURL.getProtocol().equals("jar")) {
             String jarPath;
             try {
                 jarPath = URLDecoder.decode(dirURL.getPath().substring(5, dirURL.getPath().indexOf("!")), "UTF-8");
-                DirUtil.copyToDir(new FileDirectory(jarPath), out);
+                DirUtils.copyToDir(new FileDirectory(jarPath), out);
             } catch (UnsupportedEncodingException ex) {
                 throw new BrutException(ex);
             }
@@ -137,11 +126,12 @@ public abstract class TestUtils {
 
     public static byte[] readHeaderOfFile(File file, int size) throws IOException {
         byte[] buffer = new byte[size];
-        InputStream inputStream = Files.newInputStream(file.toPath());
-        if (inputStream.read(buffer) != buffer.length) {
-            throw new IOException("File size too small for buffer length: " + size);
+
+        try (InputStream in = Files.newInputStream(file.toPath())) {
+            if (in.read(buffer) != buffer.length) {
+                throw new IOException("File size too small for buffer length: " + size);
+            }
         }
-        inputStream.close();
 
         return buffer;
     }

@@ -48,10 +48,10 @@ public class BuildAndDecodeTest extends BaseTest {
         TestUtils.copyResourceDir(BuildAndDecodeTest.class, "aapt1/testapp/", sTestOrigDir);
 
         LOGGER.info("Building testapp.apk...");
-        File testApk = new File(sTmpDir, "testapp.apk");
+        ExtFile testApk = new ExtFile(sTmpDir, "testapp.apk");
         Config config = Config.getDefaultConfig();
-        config.useAapt2 = false;
-        new ApkBuilder(config, sTestOrigDir).build(testApk);
+        config.aaptVersion = 1;
+        new ApkBuilder(sTestOrigDir, config).build(testApk);
 
         LOGGER.info("Decoding testapp.apk...");
         ApkDecoder apkDecoder = new ApkDecoder(testApk);
@@ -137,6 +137,11 @@ public class BuildAndDecodeTest extends BaseTest {
     @Test
     public void xmlPluralsTest() throws BrutException {
         compareValuesFiles("values-mcc001/plurals.xml");
+    }
+
+    @Test
+    public void miuiRegressionTest() throws BrutException {
+        compareValuesFiles("values-godzillaui/strings.xml");
     }
 
     @Test
@@ -535,7 +540,7 @@ public class BuildAndDecodeTest extends BaseTest {
     }
 
     @Test
-    public void unknownFolderTest() throws BrutException {
+    public void unknownFolderTest() throws BrutException, IOException {
         compareUnknownFiles();
     }
 

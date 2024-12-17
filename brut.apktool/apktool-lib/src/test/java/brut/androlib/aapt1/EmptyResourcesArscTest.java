@@ -33,6 +33,12 @@ import java.util.logging.Logger;
 import static org.junit.Assert.assertTrue;
 
 public class EmptyResourcesArscTest {
+    private static final Logger LOGGER = Logger.getLogger(EmptyResourcesArscTest.class.getName());
+
+    private static ExtFile sTmpDir;
+    private static ExtFile sTestOrigDir;
+    private static ExtFile sTestNewDir;
+
     @BeforeClass
     public static void beforeClass() throws Exception {
         TestUtils.cleanFrameworkFile();
@@ -42,7 +48,7 @@ public class EmptyResourcesArscTest {
         LOGGER.info("Unpacking issue1730.apk...");
         TestUtils.copyResourceDir(EmptyResourcesArscTest.class, "aapt1/issue1730", sTestOrigDir);
 
-        File testApk = new File(sTestOrigDir, "issue1730.apk");
+        ExtFile testApk = new ExtFile(sTestOrigDir, "issue1730.apk");
 
         LOGGER.info("Decoding issue1730.apk...");
         ApkDecoder apkDecoder = new ApkDecoder(testApk);
@@ -50,8 +56,8 @@ public class EmptyResourcesArscTest {
 
         LOGGER.info("Building issue1730.apk...");
         Config config = Config.getDefaultConfig();
-        config.useAapt2 = false;
-        new ApkBuilder(config, sTestNewDir).build(testApk);
+        config.aaptVersion = 1;
+        new ApkBuilder(sTestNewDir, config).build(testApk);
     }
 
     @AfterClass
@@ -64,10 +70,4 @@ public class EmptyResourcesArscTest {
         assertTrue(sTestNewDir.isDirectory());
         assertTrue(sTestOrigDir.isDirectory());
     }
-
-    private static ExtFile sTmpDir;
-    private static ExtFile sTestOrigDir;
-    private static ExtFile sTestNewDir;
-
-    private final static Logger LOGGER = Logger.getLogger(EmptyResourcesArscTest.class.getName());
 }

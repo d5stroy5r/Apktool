@@ -18,6 +18,9 @@ package brut.directory;
 
 import java.io.*;
 import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 
@@ -33,26 +36,23 @@ public class FileDirectory extends AbstractDirectory {
     }
 
     public FileDirectory(File dir) throws DirectoryException {
-        super();
-        if (! dir.isDirectory()) {
+        if (!dir.isDirectory()) {
             throw new DirectoryException("file must be a directory: " + dir);
         }
         mDir = dir;
     }
 
     @Override
-    public long getSize(String fileName)
-            throws DirectoryException {
+    public long getSize(String fileName) throws DirectoryException {
         File file = new File(generatePath(fileName));
-        if (! file.isFile()) {
+        if (!file.isFile()) {
             throw new DirectoryException("file must be a file: " + file);
         }
         return file.length();
     }
 
     @Override
-    public long getCompressedSize(String fileName)
-            throws DirectoryException {
+    public long getCompressedSize(String fileName) throws DirectoryException {
         return getSize(fileName);
     }
 
@@ -67,18 +67,20 @@ public class FileDirectory extends AbstractDirectory {
     @Override
     protected InputStream getFileInputLocal(String name) throws DirectoryException {
         try {
-            return new FileInputStream(generatePath(name));
-        } catch (FileNotFoundException e) {
-            throw new DirectoryException(e);
+            File file = new File(generatePath(name));
+            return Files.newInputStream(file.toPath());
+        } catch (IOException ex) {
+            throw new DirectoryException(ex);
         }
     }
 
     @Override
     protected OutputStream getFileOutputLocal(String name) throws DirectoryException {
         try {
-            return new FileOutputStream(generatePath(name));
-        } catch (FileNotFoundException e) {
-            throw new DirectoryException(e);
+            File file = new File(generatePath(name));
+            return Files.newOutputStream(file.toPath());
+        } catch (IOException ex) {
+            throw new DirectoryException(ex);
         }
     }
 
@@ -94,8 +96,9 @@ public class FileDirectory extends AbstractDirectory {
 
     @Override
     protected void removeFileLocal(String name) {
+        File file = new File(generatePath(name));
         //noinspection ResultOfMethodCallIgnored
-        new File(generatePath(name)).delete();
+        file.delete();
     }
 
     private String generatePath(String name) {
@@ -107,11 +110,12 @@ public class FileDirectory extends AbstractDirectory {
         mDirs = new LinkedHashMap<>();
 
         File[] files = getDir().listFiles();
+        Arrays.sort(files, Comparator.comparing(f -> f.getName()));
+
         for (File file : files) {
             if (file.isFile()) {
                 mFiles.add(file.getName());
             } else {
-                // IMPOSSIBLE_EXCEPTION
                 try {
                     mDirs.put(file.getName(), new FileDirectory(file));
                 } catch (DirectoryException ignored) {}

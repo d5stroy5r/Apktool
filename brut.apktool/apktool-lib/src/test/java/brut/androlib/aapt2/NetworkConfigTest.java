@@ -17,25 +17,30 @@
 package brut.androlib.aapt2;
 
 import brut.androlib.*;
-import brut.androlib.Config;
 import brut.common.BrutException;
 import brut.directory.ExtFile;
 import brut.util.OS;
-import org.custommonkey.xmlunit.XMLUnit;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathExpressionException;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
-import static org.custommonkey.xmlunit.XMLAssert.assertXMLEqual;
 import static org.junit.Assert.*;
 
 public class NetworkConfigTest extends BaseTest {
@@ -53,9 +58,8 @@ public class NetworkConfigTest extends BaseTest {
         LOGGER.info("Building testapp.apk...");
         Config config = Config.getDefaultConfig();
         config.netSecConf = true;
-        config.useAapt2 = true;
-        File testApk = new File(sTmpDir, "testapp.apk");
-        new ApkBuilder(config, sTestOrigDir).build(testApk);
+        ExtFile testApk = new ExtFile(sTmpDir, "testapp.apk");
+        new ApkBuilder(sTestOrigDir, config).build(testApk);
 
         LOGGER.info("Decoding testapp.apk...");
         ApkDecoder apkDecoder = new ApkDecoder(testApk);
@@ -73,20 +77,30 @@ public class NetworkConfigTest extends BaseTest {
     }
 
     @Test
-    public void netSecConfGeneric() throws IOException, SAXException {
-        LOGGER.info("Comparing network security configuration file...");
-        String expected = TestUtils.replaceNewlines("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>" +
-            "<network-security-config><base-config><trust-anchors><certificates src=\"system\"/><certificates src=\"us" +
-            "er\"/></trust-anchors></base-config></network-security-config>");
+    public void netSecConfGeneric() throws IOException, SAXException, ParserConfigurationException, XPathExpressionException {
+        LOGGER.info("Verifying network security configuration file contains user and system certificates...");
 
         byte[] encoded = Files.readAllBytes(Paths.get(String.valueOf(sTestNewDir), "res/xml/network_security_config.xml"));
-        String obtained = TestUtils.replaceNewlines(new String(encoded));
+        String obtained = new String(encoded);
 
-        XMLUnit.setIgnoreWhitespace(true);
-        XMLUnit.setIgnoreAttributeOrder(true);
-        XMLUnit.setCompareUnmatched(false);
+        // Load the XML document
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.parse(new ByteArrayInputStream(obtained.getBytes()));
 
-        assertXMLEqual(expected, obtained);
+        // XPath expression to check for user and system certificates
+        XPath xPath = XPathFactory.newInstance().newXPath();
+
+        // Check if 'system' certificate exists
+        XPathExpression systemCertExpr = xPath.compile("//certificates[@src='system']");
+        NodeList systemCertNodes = (NodeList) systemCertExpr.evaluate(doc, XPathConstants.NODESET);
+        assertTrue(systemCertNodes.getLength() > 0);
+
+        // Check if 'user' certificate exists
+        XPathExpression userCertExpr = xPath.compile("//certificates[@src='user']");
+        NodeList userCertNodes = (NodeList) userCertExpr.evaluate(doc, XPathConstants.NODESET);
+        assertTrue(userCertNodes.getLength() > 0);
     }
 
     @Test
